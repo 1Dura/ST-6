@@ -5,6 +5,7 @@ import java.awt.GridLayout;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import javax.swing.JButton;
 import javax.swing.JFrame;
@@ -19,7 +20,208 @@ enum State {
     DRAW
 }
 
-class Player {
+final class BoardGrid {
+    static final char EMPTY = ' ';
+    static final int SIZE = 9;
+
+    private static final int[][] WIN_LINES = {
+        {0, 1, 2}, {3, 4, 5}, {6, 7, 8},
+        {0, 3, 6}, {1, 4, 7}, {2, 5, 8},
+        {0, 4, 8}, {2, 4, 6}
+    };
+
+    private final char[] cells = new char[SIZE];
+
+    BoardGrid() {
+        clear();
+    }
+
+    void clear() {
+        Arrays.fill(cells, EMPTY);
+    }
+
+    char[] snapshot() {
+        return cells.clone();
+    }
+
+    char cellAt(int index) {
+        return cells[index];
+    }
+
+    boolean isOpen(int index) {
+        return index >= 0 && index < cells.length && cells[index] == EMPTY;
+    }
+
+    boolean place(int index, char symbol) {
+        if (!isOpen(index)) {
+            return false;
+        }
+        cells[index] = symbol;
+        return true;
+    }
+
+    List<Integer> openCells(char[] position) {
+        List<Integer> cellsToPlay = new ArrayList<Integer>();
+        for (int i = 0; i < position.length; i++) {
+            if (position[i] == EMPTY) {
+                cellsToPlay.add(Integer.valueOf(i));
+            }
+        }
+        return cellsToPlay;
+    }
+
+    State classify(char[] position) {
+        char winner = winnerOf(position);
+        if (winner == 'X') {
+            return State.XWIN;
+        }
+        if (winner == 'O') {
+            return State.OWIN;
+        }
+        return openCells(position).isEmpty() ? State.DRAW : State.PLAYING;
+    }
+
+    private char winnerOf(char[] position) {
+        for (int[] line : WIN_LINES) {
+            char mark = position[line[0]];
+            if (mark != EMPTY
+                    && mark == position[line[1]]
+                    && mark == position[line[2]]) {
+                return mark;
+            }
+        }
+        return EMPTY;
+    }
+}
+
+final class MinimaxPlanner {
+    static final int WIN_SCORE = 100;
+
+    private static final int[] MOVE_PRIORITY = {
+        3, 1, 3,
+        1, 4, 1,
+        3, 1, 3
+    };
+
+    int chooseMove(char[] position, char symbol) {
+        int bestMove = -1;
+        int bestScore = Integer.MIN_VALUE;
+
+        for (Integer move : availableMoves(position)) {
+            int index = move.intValue();
+            position[index] = symbol;
+            int score = scoreForOpponent(position, symbol);
+            position[index] = BoardGrid.EMPTY;
+
+            if (score > bestScore
+                    || (score == bestScore && isBetterMove(index, bestMove))) {
+                bestScore = score;
+                bestMove = index;
+            }
+        }
+
+        return bestMove;
+    }
+
+    int scoreForPlayer(char[] position, char symbol) {
+        int stateScore = terminalScore(position, symbol);
+        if (stateScore != Integer.MIN_VALUE) {
+            return stateScore;
+        }
+
+        int best = Integer.MIN_VALUE;
+        for (Integer move : availableMoves(position)) {
+            int index = move.intValue();
+            position[index] = symbol;
+            best = Math.max(best, scoreForOpponent(position, symbol));
+            position[index] = BoardGrid.EMPTY;
+        }
+        return best;
+    }
+
+    int scoreForOpponent(char[] position, char symbol) {
+        int stateScore = terminalScore(position, symbol);
+        if (stateScore != Integer.MIN_VALUE) {
+            return stateScore;
+        }
+
+        int worst = Integer.MAX_VALUE;
+        char rival = rivalOf(symbol);
+        for (Integer move : availableMoves(position)) {
+            int index = move.intValue();
+            position[index] = rival;
+            worst = Math.min(worst, scoreForPlayer(position, symbol));
+            position[index] = BoardGrid.EMPTY;
+        }
+        return worst;
+    }
+
+    int evaluate(char[] position, char symbol) {
+        int terminalScore = terminalScore(position, symbol);
+        if (terminalScore != Integer.MIN_VALUE) {
+            return terminalScore;
+        }
+        return -1;
+    }
+
+    List<Integer> availableMoves(char[] position) {
+        List<Integer> moves = new ArrayList<Integer>();
+        for (int i = 0; i < position.length; i++) {
+            if (position[i] == BoardGrid.EMPTY) {
+                moves.add(Integer.valueOf(i));
+            }
+        }
+        return moves;
+    }
+
+    private int terminalScore(char[] position, char symbol) {
+        char winner = winnerOf(position);
+        if (winner == BoardGrid.EMPTY) {
+            return isDraw(position) ? 0 : Integer.MIN_VALUE;
+        }
+        return winner == symbol ? WIN_SCORE : -WIN_SCORE;
+    }
+
+    private boolean isDraw(char[] position) {
+        for (char cell : position) {
+            if (cell == BoardGrid.EMPTY) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private char winnerOf(char[] position) {
+        int[][] lines = {
+            {0, 1, 2}, {3, 4, 5}, {6, 7, 8},
+            {0, 3, 6}, {1, 4, 7}, {2, 5, 8},
+            {0, 4, 8}, {2, 4, 6}
+        };
+
+        for (int[] line : lines) {
+            char mark = position[line[0]];
+            if (mark != BoardGrid.EMPTY
+                    && mark == position[line[1]]
+                    && mark == position[line[2]]) {
+                return mark;
+            }
+        }
+        return BoardGrid.EMPTY;
+    }
+
+    private char rivalOf(char symbol) {
+        return symbol == 'X' ? 'O' : 'X';
+    }
+
+    private boolean isBetterMove(int candidate, int incumbent) {
+        if (incumbent < 0) {
+            return true;
+        }
+        return MOVE_PRIORITY[candidate] > MOVE_PRIORITY[incumbent];
+    }
+}
+
+final class Player {
     private final char symbol;
 
     Player(char symbol) {
@@ -31,24 +233,18 @@ class Player {
     }
 }
 
-class Game {
-    static final char EMPTY = ' ';
-    static final int BOARD_SIZE = 9;
-    static final int WIN_SCORE = 100;
+final class Game {
+    static final char EMPTY = BoardGrid.EMPTY;
+    static final int WIN_SCORE = MinimaxPlanner.WIN_SCORE;
 
+    private final BoardGrid board = new BoardGrid();
+    private final MinimaxPlanner planner = new MinimaxPlanner();
     private final Player xPlayer = new Player('X');
     private final Player oPlayer = new Player('O');
-    private final char[] board = new char[BOARD_SIZE];
     private Player currentPlayer = xPlayer;
 
-    Game() {
-        reset();
-    }
-
     void reset() {
-        for (int i = 0; i < board.length; i++) {
-            board[i] = EMPTY;
-        }
+        board.clear();
         currentPlayer = xPlayer;
     }
 
@@ -61,127 +257,50 @@ class Game {
     }
 
     char[] copyBoard() {
-        return board.clone();
+        return board.snapshot();
     }
 
     char cellAt(int index) {
-        return board[index];
+        return board.cellAt(index);
     }
 
     boolean makeMove(int index) {
-        if (index < 0 || index >= board.length || board[index] != EMPTY
-                || checkState(board) != State.PLAYING) {
+        if (checkState(board.snapshot()) != State.PLAYING) {
             return false;
         }
-        board[index] = currentPlayer.getSymbol();
+        if (!board.place(index, currentPlayer.getSymbol())) {
+            return false;
+        }
         currentPlayer = currentPlayer == xPlayer ? oPlayer : xPlayer;
         return true;
     }
 
     State checkState(char[] position) {
-        char winner = winnerOf(position);
-        if (winner == 'X') {
-            return State.XWIN;
-        }
-        if (winner == 'O') {
-            return State.OWIN;
-        }
-        return generateMoves(position).isEmpty() ? State.DRAW : State.PLAYING;
+        return board.classify(position);
     }
 
     List<Integer> generateMoves(char[] position) {
-        List<Integer> moves = new ArrayList<Integer>();
-        for (int i = 0; i < position.length; i++) {
-            if (position[i] == EMPTY) {
-                moves.add(Integer.valueOf(i));
-            }
-        }
-        return moves;
+        return board.openCells(position);
     }
 
     int evaluatePosition(char[] position, Player player) {
-        State state = checkState(position);
-        if (state == State.DRAW) {
-            return 0;
-        }
-        if (state == State.PLAYING) {
-            return -1;
-        }
-        char winner = state == State.XWIN ? 'X' : 'O';
-        return winner == player.getSymbol() ? WIN_SCORE : -WIN_SCORE;
+        return planner.evaluate(position, player.getSymbol());
     }
 
     int bestMoveFor(Player player) {
-        return bestMove(copyBoard(), player);
+        return planner.chooseMove(board.snapshot(), player.getSymbol());
     }
 
     int bestMove(char[] position, Player player) {
-        int bestMove = -1;
-        int bestScore = -WIN_SCORE - 1;
-        List<Integer> moves = generateMoves(position);
-
-        for (Integer move : moves) {
-            position[move.intValue()] = player.getSymbol();
-            int score = scoreForOpponentTurn(position, player);
-            position[move.intValue()] = EMPTY;
-            if (score > bestScore) {
-                bestScore = score;
-                bestMove = move.intValue();
-            }
-        }
-        return bestMove;
+        return planner.chooseMove(position, player.getSymbol());
     }
 
     int scoreForOpponentTurn(char[] position, Player player) {
-        int score = evaluatePosition(position, player);
-        if (score != -1) {
-            return score;
-        }
-
-        int worstScore = WIN_SCORE + 1;
-        char opponent = opponentOf(player.getSymbol());
-        for (Integer move : generateMoves(position)) {
-            position[move.intValue()] = opponent;
-            worstScore = Math.min(worstScore, scoreForPlayerTurn(position, player));
-            position[move.intValue()] = EMPTY;
-        }
-        return worstScore;
+        return planner.scoreForOpponent(position, player.getSymbol());
     }
 
     int scoreForPlayerTurn(char[] position, Player player) {
-        int score = evaluatePosition(position, player);
-        if (score != -1) {
-            return score;
-        }
-
-        int bestScore = -WIN_SCORE - 1;
-        for (Integer move : generateMoves(position)) {
-            position[move.intValue()] = player.getSymbol();
-            bestScore = Math.max(bestScore, scoreForOpponentTurn(position, player));
-            position[move.intValue()] = EMPTY;
-        }
-        return bestScore;
-    }
-
-    private static char opponentOf(char symbol) {
-        return symbol == 'X' ? 'O' : 'X';
-    }
-
-    private static char winnerOf(char[] position) {
-        int[][] lines = {
-            {0, 1, 2}, {3, 4, 5}, {6, 7, 8},
-            {0, 3, 6}, {1, 4, 7}, {2, 5, 8},
-            {0, 4, 8}, {2, 4, 6}
-        };
-
-        for (int[] line : lines) {
-            char mark = position[line[0]];
-            if (mark != EMPTY && mark == position[line[1]]
-                    && mark == position[line[2]]) {
-                return mark;
-            }
-        }
-        return EMPTY;
+        return planner.scoreForPlayer(position, player.getSymbol());
     }
 }
 
@@ -199,7 +318,7 @@ public class Program {
     }
 }
 
-class TicTacToeCell extends JButton {
+final class TicTacToeCell extends JButton {
     private final int num;
     private final int row;
     private final int col;
@@ -209,7 +328,7 @@ class TicTacToeCell extends JButton {
         this.num = num;
         this.row = y;
         this.col = x;
-        this.marker = Game.EMPTY;
+        this.marker = BoardGrid.EMPTY;
         setText(Character.toString(marker));
         setFont(new Font("Arial", Font.PLAIN, 40));
     }
@@ -237,7 +356,7 @@ class TicTacToeCell extends JButton {
     }
 }
 
-class Utility {
+final class Utility {
     static String boardLine(char[] board) {
         StringBuilder result = new StringBuilder();
         for (char cell : board) {
@@ -275,9 +394,9 @@ class Utility {
     }
 }
 
-class TicTacToePanel extends JPanel implements ActionListener {
+final class TicTacToePanel extends JPanel implements ActionListener {
     private final Game game;
-    private final TicTacToeCell[] cells = new TicTacToeCell[Game.BOARD_SIZE];
+    private final TicTacToeCell[] cells = new TicTacToeCell[BoardGrid.SIZE];
 
     TicTacToePanel(GridLayout layout) {
         super(layout);
